@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  nickname      String   @default("用户")
+  gender        String   @default("female")
+  age           Int?
+  profession    String?
+  permanentCity String?  @map("permanent_city")
+  avatarUrl     String?  @map("avatar_url")
+  bodyShape     String?  @map("body_shape")
+  skinTone      String?  @map("skin_tone")
+  onboardingDone Boolean @default(false) @map("onboarding_done")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  stylePreferences  UserStylePreference[]
+  wardrobeItems     WardrobeItem[]
+  recommendationSessions RecommendationSession[]
+  outfits           Outfit[]
+  userActions       UserAction[]
+  wearEvents        WearEvent[]
+
+  @@map("users")
+}
+
+model UserStylePreference {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  tagName        String   @map("tag_name")
+  tagType        String   @map("tag_type")
+  preferenceType String   @map("preference_type")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_style_preferences")
+}
+
+model WardrobeItem {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  name              String
+  category          String
+  color             String
+  material          String?
+  brand             String?
+  price             Float?
+  imageUrl          String?  @map("image_url")
+  fitType           String?  @map("fit_type")
+  season            String?
+  sourceType        String   @default("manual") @map("source_type")
+  aiRecognizedAttrs String?  @map("ai_recognized_attrs")
+  status            String   @default("active")
+  wearCount         Int      @default(0) @map("wear_count")
+  isFavorite        Boolean  @default(false) @map("is_favorite")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outfitItems OutfitItem[]
+  tags        ItemTag[]
+
+  @@map("wardrobe_items")
+}
+
+model ItemTag {
+  id     String @id @default(uuid())
+  itemId String @map("item_id")
+  tagId  String @map("tag_id")
+
+  item WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  tag  Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, tagId])
+  @@map("item_tags")
+}
+
+model Tag {
+  id    String @id @default(uuid())
+  name  String
+  type  String
+  icon  String?
+
+  items ItemTag[]
+
+  @@map("tags")
+}
+
+model RecommendationSession {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  rawQuery    String?  @map("raw_query")
+  nlpKeywords String?  @map("nlp_keywords")
+  city        String   @default("北京")
+  temperature Float    @default(22)
+  weatherType String   @default("晴")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outfits Outfit[]
+
+  @@map("recommendation_sessions")
+}
+
+model Outfit {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  sessionId  String?   @map("session_id")
+  name       String?
+  aiComment  String?   @map("ai_comment")
+  source     String    @default("ai_generated")
+  isFavorite Boolean   @default(false) @map("is_favorite")
+  scene      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user        User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session     RecommendationSession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  items       OutfitItem[]
+  wearEvents  WearEvent[]
+  userActions UserAction[]
+
+  @@map("outfits")
+}
+
+model OutfitItem {
+  id           String @id @default(uuid())
+  outfitId     String @map("outfit_id")
+  itemId       String @map("item_id")
+  role         String?
+  displayOrder Int    @default(0) @map("display_order")
+
+  outfit Outfit      @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+  item   WardrobeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@map("outfit_items")
+}
+
+model UserAction {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  sessionId  String?  @map("session_id")
+  targetId   String   @map("target_id")
+  targetType String   @map("target_type")
+  actionType String   @map("action_type")
+  extraData  String?  @map("extra_data")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outfit Outfit? @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@map("user_actions")
+}
+
+model WearEvent {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  outfitId  String   @map("outfit_id")
+  wearDate  DateTime @map("wear_date")
+  weather   String?
+  rating    Int?
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outfit Outfit @relation(fields: [outfitId], references: [id], onDelete: Cascade)
+
+  @@map("wear_events")
+}
