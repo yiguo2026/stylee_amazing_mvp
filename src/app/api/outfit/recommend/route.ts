@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { verifyToken, getTokenFromHeaders } from '@/lib/auth';
 
-const USER_ID = 'demo-user';
+async function getUserId(req: NextRequest): Promise<string | null> {
+  const token = getTokenFromHeaders(req.headers);
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  return payload?.userId || null;
+}
 
 const SCENE_COMMENTS: Record<string, string[]> = {
   '职场': ['干练利落的商务组合，适合正式场合又不失个性。', '专业与品味兼备，展现职场自信。'],
@@ -22,11 +28,14 @@ const OUTFIT_NAMES: Record<string, string[]> = {
 };
 
 export async function POST(req: NextRequest) {
+  const userId = await getUserId(req);
+  if (!userId) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const body = await req.json();
   const { occasionTags = [], styleTags = [], colorTags = [] } = body;
 
   const items = await prisma.wardrobeItem.findMany({
-    where: { userId: USER_ID, status: 'active' },
+    where: { userId, status: 'active' },
   });
 
   const tops = items.filter(i => i.category === '上装');
@@ -79,7 +88,7 @@ export async function POST(req: NextRequest) {
 
   const session = await prisma.recommendationSession.create({
     data: {
-      userId: USER_ID,
+      userId,
       rawQuery: body.rawQuery || null,
       nlpKeywords: body.nlpKeywords || null,
       city: body.city || '北京',

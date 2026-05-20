@@ -11,16 +11,18 @@ type AppState = {
   activeTab: 'outfit' | 'wardrobe' | 'profile';
   showOnboarding: boolean;
   showLanding: boolean;
+  showLogin: boolean;
   weather: { city: string; temperature: number; weatherType: string; icon: string; desc: string; tip: string };
   wardrobeItems: any[];
   outfits: any[];
+  loading: boolean;
 };
 
 const defaultWeather = { city: '北京', temperature: 22, weatherType: '晴', icon: '☀️', desc: '晴', tip: '体感 20°C · 建议薄外套 + 长裤' };
 
 export default function Home() {
   const [state, setState] = useState<AppState>({
-    user: null, activeTab: 'outfit', showOnboarding: false, showLanding: true, weather: defaultWeather, wardrobeItems: [], outfits: [],
+    user: null, activeTab: 'outfit', showOnboarding: false, showLanding: true, showLogin: false, weather: defaultWeather, wardrobeItems: [], outfits: [], loading: true,
   });
   const [toast, setToast] = useState({ visible: false, msg: '' });
   const [subpage, setSubpage] = useState<string | null>(null);
@@ -37,21 +39,55 @@ export default function Home() {
     update(); const interval = setInterval(update, 60000); return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    fetch('/api/user').then(r => r.json()).then(d => { if (d.user) setState(s => ({ ...s, user: d.user, showLanding: !d.user.onboardingDone, showOnboarding: !d.user.onboardingDone })); }).catch(() => {});
-    fetch('/api/wardrobe').then(r => r.json()).then(d => setState(s => ({ ...s, wardrobeItems: d.items || [] }))).catch(() => {});
-    fetch('/api/outfit').then(r => r.json()).then(d => setState(s => ({ ...s, outfits: d.outfits || [] }))).catch(() => {});
+  const loadUserData = useCallback(async () => {
+    const [uRes, wRes, oRes] = await Promise.all([
+      fetch('/api/user', { credentials: 'include' }),
+      fetch('/api/wardrobe', { credentials: 'include' }),
+      fetch('/api/outfit', { credentials: 'include' }),
+    ]);
+    if (uRes.ok) {
+      const uData = await uRes.json();
+      if (uData.user) {
+        const wData = wRes.ok ? await wRes.json() : { items: [] };
+        const oData = oRes.ok ? await oRes.json() : { outfits: [] };
+        setState(s => ({ ...s, user: uData.user, showLanding: false, showLogin: false, showOnboarding: !uData.user.onboardingDone, wardrobeItems: wData.items || [], outfits: oData.outfits || [], loading: false }));
+        return;
+      }
+    }
+    setState(s => ({ ...s, loading: false }));
   }, []);
+
+  useEffect(() => { loadUserData(); }, [loadUserData]);
+
+  useEffect(() => {
+    if (state.user?.permanentCity) {
+      fetch(`/api/weather?city=${encodeURIComponent(state.user.permanentCity)}`).then(r => r.json()).then(d => { if (d.city) setState(s => ({ ...s, weather: d })); }).catch(() => {});
+    }
+  }, [state.user?.permanentCity]);
 
   const openSubpage = (id: string, data?: any) => { setSubpage(id); setSubpageData(data || null); };
   const closeSubpage = () => { setSubpage(null); setSubpageData(null); };
 
+  const handleLogout = async () => {
+    await fetch('/api/auth/me', { method: 'DELETE', credentials: 'include' });
+    setState(s => ({ ...s, user: null, showLanding: true, showLogin: false, showOnboarding: false, wardrobeItems: [], outfits: [] }));
+    showToast('已退出登录');
+  };
+
+  if (state.loading) {
+    return <div className="app-container"><div className="iphone-screen" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontSize: 18, color: '#8A8A8A' }}>加载中...</div></div></div>;
+  }
+
+  if (state.showLogin) {
+    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><LoginPage onLogin={loadUserData} onSwitchToRegister={() => setState(s => ({ ...s, showLogin: false }))} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
+  }
+
   if (state.showLanding && !state.showOnboarding) {
-    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><LandingPage onGetStarted={() => setState(s => ({ ...s, showOnboarding: true, showLanding: false }))} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
+    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><LandingPage onGetStarted={() => setState(s => ({ ...s, showOnboarding: true, showLanding: false }))} onLogin={() => setState(s => ({ ...s, showLogin: true }))} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
   }
 
   if (state.showOnboarding) {
-    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><div className="dynamic-island"></div><OnboardingPage onComplete={async (data: any) => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const uRes = await fetch('/api/user'); const uData = await uRes.json(); const wRes = await fetch('/api/wardrobe'); const wData = await wRes.json(); setState(s => ({ ...s, user: uData.user, showOnboarding: false, showLanding: false, wardrobeItems: wData.items || [] })); showToast('设置完成，欢迎使用 Stylee！'); }} onSkip={async () => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nickname: '用户', gender: 'female' }) }); setState(s => ({ ...s, showOnboarding: false, showLanding: false })); showToast('已跳过，可稍后在个人中心完善'); }} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
+    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><div className="dynamic-island"></div><OnboardingPage onComplete={async (data: any) => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(data) }); await loadUserData(); showToast('设置完成，欢迎使用 Stylee！'); }} onSkip={async () => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ nickname: '用户', gender: 'female' }) }); setState(s => ({ ...s, showOnboarding: false, showLanding: false })); showToast('已跳过，可稍后在个人中心完善'); }} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
   }
 
   return (
@@ -60,13 +96,13 @@ export default function Home() {
         <div className="status-bar"><span>{clock}</span><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><svg width="17" height="12" viewBox="0 0 17 12" fill="none"><rect x="0" y="9" width="3" height="3" rx="0.8" fill="#1a1a1a"/><rect x="4.5" y="6" width="3" height="6" rx="0.8" fill="#1a1a1a"/><rect x="9" y="3" width="3" height="9" rx="0.8" fill="#1a1a1a"/><rect x="13.5" y="0" width="3" height="12" rx="0.8" fill="#1a1a1a"/></svg><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: -0.5 }}>5G</span><svg width="26" height="12" viewBox="0 0 26 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="#1a1a1a" strokeWidth="1.5"/><rect x="3" y="3" width="18" height="6" rx="1.5" fill="#1a1a1a"/><rect x="24" y="4" width="2" height="4" rx="1" fill="#1a1a1a"/></svg></div></div>
 
         <div className={`page ${state.activeTab === 'outfit' ? 'active' : ''}`}><OutfitPage weather={state.weather} wardrobeItems={state.wardrobeItems} outfits={state.outfits} openSubpage={openSubpage} /></div>
-        <div className={`page ${state.activeTab === 'wardrobe' ? 'active' : ''}`}><WardrobePage items={state.wardrobeItems} openSubpage={openSubpage} onRefresh={async () => { const r = await fetch('/api/wardrobe'); const d = await r.json(); setState(s => ({ ...s, wardrobeItems: d.items || [] })); }} /></div>
-        <div className={`page ${state.activeTab === 'profile' ? 'active' : ''}`}><ProfilePage user={state.user} wardrobeItems={state.wardrobeItems} outfits={state.outfits} openSubpage={openSubpage} /></div>
+        <div className={`page ${state.activeTab === 'wardrobe' ? 'active' : ''}`}><WardrobePage items={state.wardrobeItems} openSubpage={openSubpage} onRefresh={async () => { const r = await fetch('/api/wardrobe', { credentials: 'include' }); const d = await r.json(); setState(s => ({ ...s, wardrobeItems: d.items || [] })); }} /></div>
+        <div className={`page ${state.activeTab === 'profile' ? 'active' : ''}`}><ProfilePage user={state.user} wardrobeItems={state.wardrobeItems} outfits={state.outfits} openSubpage={openSubpage} onLogout={handleLogout} /></div>
 
         {subpage === 'outfitOutput' && <OutfitOutputPage data={subpageData} wardrobeItems={state.wardrobeItems} onClose={closeSubpage} showToast={showToast} />}
-        {subpage === 'addItem' && <AddItemPage onClose={closeSubpage} showToast={showToast} onSaved={async () => { const r = await fetch('/api/wardrobe'); const d = await r.json(); setState(s => ({ ...s, wardrobeItems: d.items || [] })); }} />}
+        {subpage === 'addItem' && <AddItemPage onClose={closeSubpage} showToast={showToast} onSaved={async () => { const r = await fetch('/api/wardrobe', { credentials: 'include' }); const d = await r.json(); setState(s => ({ ...s, wardrobeItems: d.items || [] })); }} />}
         {subpage === 'itemDetail' && <ItemDetailPage item={subpageData} onClose={closeSubpage} showToast={showToast} />}
-        {subpage === 'settings' && <SettingsPage onClose={closeSubpage} showToast={showToast} />}
+        {subpage === 'settings' && <SettingsPage onClose={closeSubpage} showToast={showToast} onLogout={handleLogout} />}
         {subpage === 'stylePref' && <StylePreferencePage onClose={closeSubpage} showToast={showToast} />}
         {subpage === 'outfitLibrary' && <OutfitLibraryPage outfits={state.outfits} onClose={closeSubpage} />}
 
@@ -83,14 +119,49 @@ export default function Home() {
 
 function Toast({ visible, msg }: { visible: boolean; msg: string }) { return <div className={`toast ${visible ? 'show' : ''}`}>{msg}</div>; }
 
-function LandingPage({ onGetStarted }: { onGetStarted: () => void }) {
+function LoginPage({ onLogin, onSwitchToRegister }: { onLogin: () => void; onSwitchToRegister: () => void }) {
+  const [isRegister, setIsRegister] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    setError('');
+    if (!username || !password) { setError('请填写用户名和密码'); return; }
+    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+    const body = isRegister ? { username, password, nickname: nickname || username } : { username, password };
+    try {
+      const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || '操作失败'); return; }
+      onLogin();
+    } catch { setError('网络错误，请重试'); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px 32px', textAlign: 'center', background: '#FAF9F7' }}>
+      <div style={{ width: 100, height: 100, background: 'linear-gradient(135deg, #6C5CE7, #A29BFE)', borderRadius: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 52, marginBottom: 24, boxShadow: '0 12px 40px rgba(108,92,231,0.3)' }}>👔</div>
+      <div style={{ fontSize: 26, fontWeight: 800, marginBottom: 6, letterSpacing: -0.5 }}>Stylee</div>
+      <div style={{ fontSize: 14, color: '#8A8A8A', marginBottom: 32 }}>{isRegister ? '创建你的穿搭账号' : '欢迎回来'}</div>
+      {error && <div style={{ width: '100%', padding: '10px 14px', borderRadius: 10, background: '#FF3B3015', color: '#FF3B30', fontSize: 13, marginBottom: 12, textAlign: 'left' }}>{error}</div>}
+      <div style={{ width: '100%', marginBottom: 12 }}><input className="form-input" placeholder="用户名" value={username} onChange={e => setUsername(e.target.value)} /></div>
+      <div style={{ width: '100%', marginBottom: 12 }}><input className="form-input" type="password" placeholder="密码" value={password} onChange={e => setPassword(e.target.value)} /></div>
+      {isRegister && <div style={{ width: '100%', marginBottom: 12 }}><input className="form-input" placeholder="昵称（可选）" value={nickname} onChange={e => setNickname(e.target.value)} /></div>}
+      <button className="btn-primary" style={{ marginBottom: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }} onClick={handleSubmit}>{isRegister ? '✨ 注册' : '🔑 登录'}</button>
+      <div style={{ fontSize: 14, color: '#6C5CE7', cursor: 'pointer', fontWeight: 500 }} onClick={() => { setIsRegister(!isRegister); setError(''); }}>{isRegister ? '已有账号？登录' : '没有账号？注册'}</div>
+    </div>
+  );
+}
+
+function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => void; onLogin: () => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '40px 32px', textAlign: 'center', background: '#FAF9F7' }}>
       <div style={{ width: 140, height: 140, background: 'linear-gradient(135deg, #6C5CE7, #A29BFE)', borderRadius: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 72, marginBottom: 28, boxShadow: '0 12px 40px rgba(108,92,231,0.3)' }}>👔</div>
       <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 10, letterSpacing: -0.5 }}>Stylee</div>
       <div style={{ fontSize: 16, color: '#8A8A8A', lineHeight: 1.6, marginBottom: 48 }}>你的 AI 私人穿搭顾问<br />从衣橱出发，穿出更好的自己</div>
       <button className="btn-primary" style={{ marginBottom: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.15)' }} onClick={onGetStarted}>✨ 开始体验</button>
-      <button className="btn-secondary" style={{ marginBottom: 16 }}>已有账号？登录</button>
+      <button className="btn-secondary" style={{ marginBottom: 16 }} onClick={onLogin}>已有账号？登录</button>
       <div style={{ fontSize: 13, color: '#B5B3B0' }}>注册即代表同意 <span style={{ color: '#6C5CE7', cursor: 'pointer' }}>用户协议</span> 和 <span style={{ color: '#6C5CE7', cursor: 'pointer' }}>隐私政策</span></div>
     </div>
   );
@@ -151,8 +222,8 @@ function OutfitPage({ weather, wardrobeItems, outfits, openSubpage }: { weather:
   const nlpMapping: Record<string, { group: string; keyword: string }> = { '约会': { group: 'occasion', keyword: '约会' }, '通勤': { group: 'occasion', keyword: '通勤' }, '运动': { group: 'occasion', keyword: '运动' }, '法式': { group: 'style', keyword: '法式' }, '极简': { group: 'style', keyword: '极简' }, '街头': { group: 'style', keyword: '街头' }, '甜美': { group: 'style', keyword: '甜美' }, '韩系': { group: 'style', keyword: '韩系' }, '复古': { group: 'style', keyword: '复古' }, '暖色': { group: 'color', keyword: '暖色' }, '冷色': { group: 'color', keyword: '冷色' } };
   const handleSearch = (val: string) => { setSearch(val); const matched: string[] = []; const newTags: Record<string, string[]> = { occasion: [], style: [], color: [], temp: selectedTags.temp }; for (const [k, v] of Object.entries(nlpMapping)) { if (val.includes(k)) { matched.push(k); if (!newTags[v.group].includes(v.keyword)) newTags[v.group].push(v.keyword); } } setNlpKeywords(matched); setSelectedTags(newTags); };
   const toggleTag = (group: string, keyword: string) => { setSelectedTags(prev => { const arr = prev[group] || []; return { ...prev, [group]: arr.includes(keyword) ? arr.filter(t => t !== keyword) : [...arr, keyword] }; }); };
-  const generate = async () => { try { const res = await fetch('/api/outfit/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rawQuery: search, city: weather.city, temperature: weather.temperature, weatherType: weather.weatherType, occasionTags: selectedTags.occasion, styleTags: selectedTags.style, colorTags: selectedTags.color }) }); const data = await res.json(); openSubpage('outfitOutput', data); } catch { openSubpage('outfitOutput', { outfits: [{ name: '推荐搭配', items: wardrobeItems.slice(0, 4).map(i => ({ ...i, role: i.category })), aiComment: '从你的衣橱中精选搭配', scene: '日常' }] }); } };
-  const cities = [{ name: '北京', temp: 22, icon: '☀️', desc: '晴' }, { name: '上海', temp: 25, icon: '🌤', desc: '多云' }, { name: '广州', temp: 30, icon: '🌧', desc: '阵雨' }, { name: '成都', temp: 19, icon: '🌥', desc: '阴' }, { name: '哈尔滨', temp: 12, icon: '🌧', desc: '小雨' }, { name: '三亚', temp: 33, icon: '☀️', desc: '晴热' }];
+  const generate = async () => { try { const res = await fetch('/api/outfit/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ rawQuery: search, city: weather.city, temperature: weather.temperature, weatherType: weather.weatherType, occasionTags: selectedTags.occasion, styleTags: selectedTags.style, colorTags: selectedTags.color }) }); const data = await res.json(); openSubpage('outfitOutput', data); } catch { openSubpage('outfitOutput', { outfits: [{ name: '推荐搭配', items: wardrobeItems.slice(0, 4).map(i => ({ ...i, role: i.category })), aiComment: '从你的衣橱中精选搭配', scene: '日常' }] }); } };
+  const cities = ['北京', '上海', '广州', '深圳', '成都', '杭州', '武汉', '哈尔滨', '三亚', '西安'];
   return (
     <div className="content">
       <div className="weather-bar" onClick={() => setShowCityModal(true)}><div><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ fontSize: 18 }}>{weather.icon}</span><span><strong>{weather.city}</strong> · {weather.temperature}°C {weather.desc}</span></div><div style={{ fontSize: 11, opacity: 0.9, marginTop: 2 }}>{weather.tip}</div></div><div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: 12, fontSize: 11, border: '1px solid rgba(255,255,255,0.3)', color: 'white' }}>📍 切换</div></div>
@@ -165,7 +236,7 @@ function OutfitPage({ weather, wardrobeItems, outfits, openSubpage }: { weather:
       </div>
       <div style={{ padding: '16px 20px' }}><button className="btn-accent" onClick={generate}>✨ 生成穿搭推荐</button></div>
       <div style={{ padding: '0 20px 20px' }}><div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '14px 18px' }} onClick={() => openSubpage('outfitLibrary')}><div><div style={{ fontWeight: 700, marginBottom: 3, fontSize: 15 }}>📂 穿搭记录</div><div style={{ fontSize: 12, color: '#8A8A8A' }}>{outfits.length}套搭配</div></div><div style={{ display: 'flex' }}>{['👔','👗','👕'].map((e, i) => <div key={i} style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#E8D5C4,#C49A6C)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, marginLeft: -6, border: '2px solid #fff' }}>{e}</div>)}</div></div></div>
-      {showCityModal && <div className="modal-overlay active" onClick={() => setShowCityModal(false)}><div className="modal-sheet" onClick={e => e.stopPropagation()}><div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, textAlign: 'center' }}>📍 选择城市</div>{cities.map(c => <div key={c.name} style={{ padding: '10px 12px', fontSize: 14, color: '#636E72', borderRadius: 8, cursor: 'pointer' }}>{c.name} · {c.temp}°C {c.icon}</div>)}</div></div>}
+      {showCityModal && <div className="modal-overlay active" onClick={() => setShowCityModal(false)}><div className="modal-sheet" onClick={e => e.stopPropagation()}><div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, textAlign: 'center' }}>📍 选择城市</div>{cities.map(c => <div key={c} style={{ padding: '10px 12px', fontSize: 14, color: '#636E72', borderRadius: 8, cursor: 'pointer' }} onClick={async () => { setShowCityModal(false); const r = await fetch(`/api/weather?city=${encodeURIComponent(c)}`); const d = await r.json(); if (d.city) window.dispatchEvent(new CustomEvent('weather-update', { detail: d })); }}>{c}</div>)}</div></div>}
       <div style={{ height: 20 }}></div>
     </div>
   );
@@ -186,7 +257,7 @@ function OutfitOutputPage({ data, onClose, showToast }: { data: any; wardrobeIte
         <div style={{ padding: '0 20px', marginTop: 12 }}><span style={{ fontSize: 13 }}>搭配单品</span></div>
         <div style={{ display: 'flex', gap: 10, padding: '8px 20px', overflowX: 'auto' }}>{current.items.map((item: any, i: number) => <div key={i} className="item-card"><div style={{ width: 48, height: 48, borderRadius: 10, background: 'linear-gradient(135deg,#D4A574,#C49A6C)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>{CATEGORY_EMOJI[item.role] || '👕'}</div><div style={{ display: 'flex', flexDirection: 'column' }}><span style={{ fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap' }}>{item.name}</span><span style={{ fontSize: 10, color: '#B2BEC3', marginTop: 1 }}>{item.role}</span></div></div>)}</div>
         {current.aiComment && <div className="ai-comment"><p>{current.aiComment}</p></div>}
-        <div className="decision-bar"><button className="decision-btn adjust">稍作调整</button><button className="decision-btn confirm" onClick={() => { showToast('已保存到我的搭配'); onClose(); }}>✨ 就这么穿</button></div>
+        <div className="decision-bar"><button className="decision-btn adjust">稍作调整</button><button className="decision-btn confirm" onClick={async () => { await fetch('/api/outfit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ name: current.name, scene: current.scene, aiComment: current.aiComment, source: 'ai_generated', items: current.items.map((it: any, i: number) => ({ itemId: it.id, role: it.role, displayOrder: i })) }) }); showToast('已保存到我的搭配'); onClose(); }}>✨ 就这么穿</button></div>
       </div>
     </div>
   );
@@ -208,13 +279,13 @@ function WardrobePage({ items, openSubpage, onRefresh }: { items: any[]; openSub
   );
 }
 
-function ProfilePage({ user, wardrobeItems, outfits, openSubpage }: { user: any; wardrobeItems: any[]; outfits: any[]; openSubpage: (id: string, data?: any) => void }) {
+function ProfilePage({ user, wardrobeItems, outfits, openSubpage, onLogout }: { user: any; wardrobeItems: any[]; outfits: any[]; openSubpage: (id: string, data?: any) => void; onLogout: () => void }) {
   const [calMonth, setCalMonth] = useState(new Date());
   const year = calMonth.getFullYear(), month = calMonth.getMonth(), firstDay = new Date(year, month, 1).getDay(), daysInMonth = new Date(year, month + 1, 0).getDate(), today = new Date();
   const calDays: (number | null)[] = []; for (let i = 0; i < firstDay; i++) calDays.push(null); for (let d = 1; d <= daysInMonth; d++) calDays.push(d);
   return (
     <div className="content">
-      <div className="profile-header-gradient"><div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, position: 'relative', zIndex: 1 }}><div style={{ width: 72, height: 72, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, border: '3px solid rgba(255,255,255,0.5)' }}>👩</div><div><h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>{user?.nickname || '小美'}</h2><div style={{ display: 'flex', gap: 8, fontSize: 12, opacity: 0.9, flexWrap: 'wrap' }}>{[user?.gender === 'male' ? '男' : '女', user?.age ? `${user.age}岁` : '', user?.permanentCity || '上海', user?.profession || '设计师'].filter(Boolean).map((t, i) => <span key={i} style={{ background: 'rgba(255,255,255,0.2)', padding: '3px 10px', borderRadius: 12 }}>{t}</span>)}</div></div></div>
+      <div className="profile-header-gradient"><div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, position: 'relative', zIndex: 1 }}><div style={{ width: 72, height: 72, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, border: '3px solid rgba(255,255,255,0.5)' }}>{user?.gender === 'male' ? '👨' : '👩'}</div><div><h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>{user?.nickname || '用户'}</h2><div style={{ display: 'flex', gap: 8, fontSize: 12, opacity: 0.9, flexWrap: 'wrap' }}>{[user?.gender === 'male' ? '男' : '女', user?.age ? `${user.age}岁` : '', user?.permanentCity || '', user?.profession || ''].filter(Boolean).map((t, i) => <span key={i} style={{ background: 'rgba(255,255,255,0.2)', padding: '3px 10px', borderRadius: 12 }}>{t}</span>)}</div></div></div>
         <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.2)', position: 'relative', zIndex: 1 }}><div style={{ textAlign: 'center' }}><div style={{ fontSize: 22, fontWeight: 700 }}>{wardrobeItems.length}</div><div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>衣服</div></div><div style={{ textAlign: 'center' }}><div style={{ fontSize: 22, fontWeight: 700 }}>{outfits.length}</div><div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>搭配</div></div><div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openSubpage('settings')}><div style={{ fontSize: 18 }}>⚙️</div><div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>设置</div></div></div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px 8px' }}><span style={{ fontSize: 17, fontWeight: 600 }}>我的衣橱</span></div>
@@ -235,7 +306,7 @@ function ProfilePage({ user, wardrobeItems, outfits, openSubpage }: { user: any;
 function AddItemPage({ onClose, showToast, onSaved }: { onClose: () => void; showToast: (msg: string) => void; onSaved: () => void }) {
   const [form, setForm] = useState({ name: '', category: '上装', color: '', material: '', brand: '', price: '' });
   const categories = [['上装', '下装', '外套'], ['鞋', '包', '配饰']];
-  const save = async () => { if (!form.name || !form.color) { showToast('请填写名称和颜色'); return; } await fetch('/api/wardrobe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }); showToast('单品已保存'); onSaved(); onClose(); };
+  const save = async () => { if (!form.name || !form.color) { showToast('请填写名称和颜色'); return; } await fetch('/api/wardrobe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) }); showToast('单品已保存'); onSaved(); onClose(); };
   return (
     <div className="subpage-overlay active"><div className="subpage-header"><button style={{ fontSize: 15, color: '#2C2C2C', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }} onClick={onClose}>← 返回</button><h2 style={{ fontSize: 17, fontWeight: 700 }}>添加单品</h2><button style={{ fontSize: 15, color: '#6C5CE7', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }} onClick={save}>保存</button></div>
       <div className="subpage-content"><div style={{ padding: '16px 20px 0' }}><span style={{ fontSize: 17, fontWeight: 600 }}>照片</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, padding: '0 20px 16px' }}>{[1,2,3,4,5,6].map(i => <div key={i} style={{ aspectRatio: 1, background: '#fff', border: '2px dashed #D5D3D0', borderRadius: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => showToast('选择照片')}><div style={{ width: 28, height: 28, borderRadius: '50%', background: '#F0EEEB', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 4 }}>+</div><span style={{ fontSize: 11, color: '#8A8A8A' }}>添加</span></div>)}</div>
@@ -266,17 +337,15 @@ function ItemDetailPage({ item, onClose, showToast }: { item: any; onClose: () =
   );
 }
 
-function SettingsPage({ onClose, showToast }: { onClose: () => void; showToast: (msg: string) => void }) {
+function SettingsPage({ onClose, showToast, onLogout }: { onClose: () => void; showToast: (msg: string) => void; onLogout: () => void }) {
   const groups = [
     { title: '通知', rows: [{ icon: '🔔', label: '每日穿搭提醒', toggle: true, on: true }, { icon: '📰', label: '搭配推荐通知', toggle: true, on: true }, { icon: '💬', label: '社交互动通知', toggle: true, on: false }] },
-    { title: '账号与安全', rows: [{ icon: '📱', label: '手机号', value: '138****8888' }, { icon: '🔑', label: '登录密码', value: '已设置' }, { icon: '💬', label: '微信绑定', value: '已绑定' }] },
-    { title: '隐私', rows: [{ icon: '👁️', label: '允许他人查看衣橱', toggle: true, on: false }, { icon: '📍', label: '位置信息', toggle: true, on: true }] },
-    { title: '数据管理', rows: [{ icon: '☁️', label: '数据备份', value: '今天 08:30' }, { icon: '🗑️', label: '清除缓存', value: '128 MB' }] },
-    { title: '关于', rows: [{ icon: 'ℹ️', label: '当前版本', value: 'v1.0.0' }, { icon: '✏️', label: '意见反馈' }] },
+    { title: '数据管理', rows: [{ icon: '🗑️', label: '清除缓存', value: '128 MB' }] },
+    { title: '关于', rows: [{ icon: 'ℹ️', label: '当前版本', value: 'v1.1.0' }, { icon: '✏️', label: '意见反馈' }] },
   ];
   return (
     <div className="subpage-overlay active"><div className="subpage-header"><button style={{ fontSize: 15, color: '#2C2C2C', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit' }} onClick={onClose}>← 返回</button><h2 style={{ fontSize: 17, fontWeight: 700 }}>设置</h2><div style={{ width: 60 }}></div></div>
-      <div className="subpage-content">{groups.map((g, gi) => <div key={gi}><div style={{ fontSize: 13, color: '#8A8A8A', padding: '8px 20px' }}>{g.title}</div><div style={{ background: '#fff', margin: '0 20px 12px', borderRadius: 16, overflow: 'hidden' }}>{g.rows.map((r, ri) => <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', fontSize: 15, color: '#1c1c1e', cursor: 'pointer', borderBottom: ri < g.rows.length - 1 ? '1px solid #f2f2f7' : 'none' }}><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span>{r.icon}</span><span>{r.label}</span></div>{'toggle' in r ? <div className={`toggle-switch ${r.on ? 'active' : ''}`}><div className="toggle-knob"></div></div> : <span style={{ fontSize: 13, color: '#8A8A8A' }}>{'value' in r ? r.value : ''} ›</span>}</div>)}</div></div>)}<div style={{ background: '#fff', margin: '0 20px 20px', borderRadius: 16, overflow: 'hidden' }}><div style={{ padding: 16, color: '#FF3B30', textAlign: 'center', fontSize: 15, fontWeight: 600, cursor: 'pointer' }} onClick={() => { showToast('已退出登录'); onClose(); }}>🚪 退出登录</div></div></div>
+      <div className="subpage-content">{groups.map((g, gi) => <div key={gi}><div style={{ fontSize: 13, color: '#8A8A8A', padding: '8px 20px' }}>{g.title}</div><div style={{ background: '#fff', margin: '0 20px 12px', borderRadius: 16, overflow: 'hidden' }}>{g.rows.map((r, ri) => <div key={ri} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', fontSize: 15, color: '#1c1c1e', cursor: 'pointer', borderBottom: ri < g.rows.length - 1 ? '1px solid #f2f2f7' : 'none' }}><div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span>{r.icon}</span><span>{r.label}</span></div>{'toggle' in r ? <div className={`toggle-switch ${r.on ? 'active' : ''}`}><div className="toggle-knob"></div></div> : <span style={{ fontSize: 13, color: '#8A8A8A' }}>{'value' in r ? r.value : ''} ›</span>}</div>)}</div></div>)}<div style={{ background: '#fff', margin: '0 20px 20px', borderRadius: 16, overflow: 'hidden' }}><div style={{ padding: 16, color: '#FF3B30', textAlign: 'center', fontSize: 15, fontWeight: 600, cursor: 'pointer' }} onClick={() => { onLogout(); onClose(); }}>🚪 退出登录</div></div></div>
     </div>
   );
 }

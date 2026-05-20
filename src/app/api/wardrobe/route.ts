@@ -1,21 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { verifyToken, getTokenFromHeaders } from '@/lib/auth';
 
-const USER_ID = 'demo-user';
+async function getUserId(req: NextRequest): Promise<string | null> {
+  const token = getTokenFromHeaders(req.headers);
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  return payload?.userId || null;
+}
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const userId = await getUserId(req);
+  if (!userId) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const items = await prisma.wardrobeItem.findMany({
-    where: { userId: USER_ID, status: 'active' },
+    where: { userId, status: 'active' },
     orderBy: { createdAt: 'desc' },
   });
   return NextResponse.json({ items });
 }
 
 export async function POST(req: NextRequest) {
+  const userId = await getUserId(req);
+  if (!userId) return NextResponse.json({ error: '未登录' }, { status: 401 });
+
   const body = await req.json();
   const item = await prisma.wardrobeItem.create({
     data: {
-      userId: USER_ID,
+      userId,
       name: body.name,
       category: body.category,
       color: body.color,

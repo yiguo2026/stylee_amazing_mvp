@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { PrismaClient } from '../src/generated/prisma/client';
+import { hashPassword } from '../src/lib/auth';
 import { PrismaLibSql } from '@prisma/adapter-libsql';
 
 const adapter = new PrismaLibSql({
@@ -67,6 +68,8 @@ async function main() {
     update: {},
     create: {
       id: 'demo-user',
+      username: 'xiaomei',
+      passwordHash: await hashPassword('1234'),
       nickname: '小美',
       gender: 'female',
       age: 25,
