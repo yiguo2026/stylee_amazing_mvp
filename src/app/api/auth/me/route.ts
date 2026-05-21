@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken, getTokenFromHeaders, COOKIE_NAME } from '@/lib/auth';
 
+const isProd = process.env.VERCEL === '1';
+
 export async function GET(req: NextRequest) {
   const token = getTokenFromHeaders(req.headers);
   if (!token) {
@@ -27,6 +29,6 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE() {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(COOKIE_NAME, '', { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 0, path: '/' });
+  res.cookies.set(COOKIE_NAME, '', { httpOnly: true, secure: isProd, sameSite: 'lax', maxAge: 0, path: '/' });
   return res;
 }

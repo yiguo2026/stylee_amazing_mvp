@@ -9,7 +9,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '用户名和密码不能为空' }, { status: 400 });
   }
 
-  const user = await prisma.user.findUnique({ where: { username } });
+  let user;
+  try {
+    user = await prisma.user.findFirst({ where: { username } });
+  } catch (e) {
+    console.error('login findUser error:', e);
+    return NextResponse.json({ error: '登录失败，请稍后重试' }, { status: 500 });
+  }
   if (!user) {
     return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
   }
@@ -20,7 +26,8 @@ export async function POST(req: NextRequest) {
   }
 
   const token = await createToken(user.id);
+  const isProd = process.env.VERCEL === '1';
   const res = NextResponse.json({ ok: true, user: { id: user.id, username: user.username, nickname: user.nickname, gender: user.gender, onboardingDone: user.onboardingDone } });
-  res.cookies.set(COOKIE_NAME, token, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 30 * 24 * 3600, path: '/' });
+  res.cookies.set(COOKIE_NAME, token, { httpOnly: true, secure: isProd, sameSite: 'lax', maxAge: 30 * 24 * 3600, path: '/' });
   return res;
 }

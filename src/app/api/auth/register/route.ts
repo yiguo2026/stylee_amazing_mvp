@@ -20,19 +20,25 @@ export async function POST(req: NextRequest) {
     existing = await prisma.user.findFirst({ where: { username } });
   } catch (e) {
     console.error('findUser error:', e);
-    return NextResponse.json({ error: '注册失败，请稍后重试' }, { status: 500 });
+    return NextResponse.json({ error: `查询失败: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
   }
   if (existing) {
     return NextResponse.json({ error: '用户名已存在' }, { status: 409 });
   }
 
-  const passwordHash = await hashPassword(password);
-  const user = await prisma.user.create({
-    data: { username, passwordHash, nickname: nickname || username },
-  });
+  try {
+    const passwordHash = await hashPassword(password);
+    const user = await prisma.user.create({
+      data: { username, passwordHash, nickname: nickname || username },
+    });
 
-  const token = await createToken(user.id);
-  const res = NextResponse.json({ ok: true, user: { id: user.id, username: user.username, nickname: user.nickname } });
-  res.cookies.set(COOKIE_NAME, token, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 30 * 24 * 3600, path: '/' });
-  return res;
+    const token = await createToken(user.id);
+    const isProd = process.env.VERCEL === '1';
+    const res = NextResponse.json({ ok: true, user: { id: user.id, username: user.username, nickname: user.nickname } });
+    res.cookies.set(COOKIE_NAME, token, { httpOnly: true, secure: isProd, sameSite: 'lax', maxAge: 30 * 24 * 3600, path: '/' });
+    return res;
+  } catch (e) {
+    console.error('createUser error:', e);
+    return NextResponse.json({ error: `注册失败: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
+  }
 }

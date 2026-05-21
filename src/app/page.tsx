@@ -40,21 +40,25 @@ export default function Home() {
   }, []);
 
   const loadUserData = useCallback(async () => {
-    const [uRes, wRes, oRes] = await Promise.all([
-      fetch('/api/user', { credentials: 'include' }),
-      fetch('/api/wardrobe', { credentials: 'include' }),
-      fetch('/api/outfit', { credentials: 'include' }),
-    ]);
-    if (uRes.ok) {
-      const uData = await uRes.json();
-      if (uData.user) {
-        const wData = wRes.ok ? await wRes.json() : { items: [] };
-        const oData = oRes.ok ? await oRes.json() : { outfits: [] };
-        setState(s => ({ ...s, user: uData.user, showLanding: false, showLogin: false, showOnboarding: !uData.user.onboardingDone, wardrobeItems: wData.items || [], outfits: oData.outfits || [], loading: false }));
-        return;
+    try {
+      const [uRes, wRes, oRes] = await Promise.all([
+        fetch('/api/user', { credentials: 'include' }),
+        fetch('/api/wardrobe', { credentials: 'include' }),
+        fetch('/api/outfit', { credentials: 'include' }),
+      ]);
+      if (uRes.ok) {
+        const uData = await uRes.json();
+        if (uData.user) {
+          const wData = wRes.ok ? await wRes.json() : { items: [] };
+          const oData = oRes.ok ? await oRes.json() : { outfits: [] };
+          setState(s => ({ ...s, user: uData.user, showLanding: false, showLogin: false, showOnboarding: !uData.user.onboardingDone, wardrobeItems: wData.items || [], outfits: oData.outfits || [], loading: false }));
+          return;
+        }
       }
+    } catch (e) {
+      console.error('loadUserData error:', e);
     }
-    setState(s => ({ ...s, loading: false }));
+    setState(s => ({ ...s, loading: false, showLogin: false }));
   }, []);
 
   useEffect(() => { loadUserData(); }, [loadUserData]);
@@ -143,7 +147,7 @@ function LoginPage({ onLogin, onSwitchToRegister }: { onLogin: () => void; onSwi
       const data = await res.json();
       if (!res.ok) { setError(data.error || '操作失败'); return; }
       onLogin();
-    } catch { setError('网络错误，请重试'); }
+    } catch (e) { setError(`网络错误: ${e instanceof Error ? e.message : '请重试'}`); }
   };
 
   return (
