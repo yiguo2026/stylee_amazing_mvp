@@ -15,7 +15,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '密码至少 4 个字符' }, { status: 400 });
   }
 
-  const existing = await prisma.user.findUnique({ where: { username } });
+  let existing;
+  try {
+    existing = await prisma.user.findFirst({ where: { username } });
+  } catch (e) {
+    console.error('findUser error:', e);
+    return NextResponse.json({ error: '注册失败，请稍后重试' }, { status: 500 });
+  }
   if (existing) {
     return NextResponse.json({ error: '用户名已存在' }, { status: 409 });
   }

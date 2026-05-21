@@ -90,7 +90,7 @@ export default function Home() {
   }
 
   if (state.showLanding && !state.showOnboarding) {
-    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><LandingPage onGetStarted={() => setState(s => ({ ...s, showOnboarding: true, showLanding: false }))} onLogin={() => setState(s => ({ ...s, showLogin: true }))} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
+    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><LandingPage onGetStarted={() => setState(s => ({ ...s, showLogin: true, showLanding: false }))} onLogin={() => setState(s => ({ ...s, showLogin: true }))} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
   }
 
   if (state.showOnboarding) {
