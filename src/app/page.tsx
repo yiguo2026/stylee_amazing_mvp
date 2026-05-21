@@ -59,11 +59,18 @@ export default function Home() {
 
   useEffect(() => { loadUserData(); }, [loadUserData]);
 
+  const updateWeather = useCallback(async (city: string) => {
+    try {
+      const r = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
+      const d = await r.json();
+      if (d.city) setState(s => ({ ...s, weather: d }));
+    } catch {}
+  }, []);
+
   useEffect(() => {
-    if (state.user?.permanentCity) {
-      fetch(`/api/weather?city=${encodeURIComponent(state.user.permanentCity)}`).then(r => r.json()).then(d => { if (d.city) setState(s => ({ ...s, weather: d })); }).catch(() => {});
-    }
-  }, [state.user?.permanentCity]);
+    const city = state.user?.permanentCity || '北京';
+    updateWeather(city);
+  }, [state.user?.permanentCity, updateWeather]);
 
   const openSubpage = (id: string, data?: any) => { setSubpage(id); setSubpageData(data || null); };
   const closeSubpage = () => { setSubpage(null); setSubpageData(null); };
@@ -87,7 +94,7 @@ export default function Home() {
   }
 
   if (state.showOnboarding) {
-    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><div className="dynamic-island"></div><OnboardingPage onComplete={async (data: any) => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(data) }); await loadUserData(); showToast('设置完成，欢迎使用 Stylee！'); }} onSkip={async () => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ nickname: '用户', gender: 'female' }) }); setState(s => ({ ...s, showOnboarding: false, showLanding: false })); showToast('已跳过，可稍后在个人中心完善'); }} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
+    return (<ToastContext.Provider value={{ show: showToast }}><div className="app-container"><div className="iphone-screen"><div className="dynamic-island"></div><OnboardingPage onComplete={async (data: any) => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(data) }); setState(s => ({ ...s, showOnboarding: false, showLanding: false })); await loadUserData(); showToast('设置完成，欢迎使用 Stylee！'); }} onSkip={async () => { await fetch('/api/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ nickname: '用户', gender: 'female' }) }); setState(s => ({ ...s, showOnboarding: false, showLanding: false })); showToast('已跳过，可稍后在个人中心完善'); }} /><Toast visible={toast.visible} msg={toast.msg} /></div></div></ToastContext.Provider>);
   }
 
   return (
@@ -95,7 +102,7 @@ export default function Home() {
       <div className="app-container"><div className="iphone-screen"><div className="dynamic-island"></div><div className="home-indicator"></div>
         <div className="status-bar"><span>{clock}</span><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><svg width="17" height="12" viewBox="0 0 17 12" fill="none"><rect x="0" y="9" width="3" height="3" rx="0.8" fill="#1a1a1a"/><rect x="4.5" y="6" width="3" height="6" rx="0.8" fill="#1a1a1a"/><rect x="9" y="3" width="3" height="9" rx="0.8" fill="#1a1a1a"/><rect x="13.5" y="0" width="3" height="12" rx="0.8" fill="#1a1a1a"/></svg><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: -0.5 }}>5G</span><svg width="26" height="12" viewBox="0 0 26 12" fill="none"><rect x="1" y="1" width="22" height="10" rx="2.5" stroke="#1a1a1a" strokeWidth="1.5"/><rect x="3" y="3" width="18" height="6" rx="1.5" fill="#1a1a1a"/><rect x="24" y="4" width="2" height="4" rx="1" fill="#1a1a1a"/></svg></div></div>
 
-        <div className={`page ${state.activeTab === 'outfit' ? 'active' : ''}`}><OutfitPage weather={state.weather} wardrobeItems={state.wardrobeItems} outfits={state.outfits} openSubpage={openSubpage} /></div>
+        <div className={`page ${state.activeTab === 'outfit' ? 'active' : ''}`}><OutfitPage weather={state.weather} wardrobeItems={state.wardrobeItems} outfits={state.outfits} openSubpage={openSubpage} updateWeather={updateWeather} /></div>
         <div className={`page ${state.activeTab === 'wardrobe' ? 'active' : ''}`}><WardrobePage items={state.wardrobeItems} openSubpage={openSubpage} onRefresh={async () => { const r = await fetch('/api/wardrobe', { credentials: 'include' }); const d = await r.json(); setState(s => ({ ...s, wardrobeItems: d.items || [] })); }} /></div>
         <div className={`page ${state.activeTab === 'profile' ? 'active' : ''}`}><ProfilePage user={state.user} wardrobeItems={state.wardrobeItems} outfits={state.outfits} openSubpage={openSubpage} onLogout={handleLogout} /></div>
 
@@ -169,16 +176,45 @@ function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => void; onLo
 
 function OnboardingPage({ onComplete, onSkip }: { onComplete: (data: any) => void; onSkip: () => void }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ nickname: '', gender: 'female', age: '', profession: '' });
+  const [form, setForm] = useState({ nickname: '', gender: 'female', age: '', profession: '', permanentCity: '' });
   const [likes, setLikes] = useState<string[]>([]);
   const [dislikes, setDislikes] = useState<string[]>([]);
+  const [initialItems, setInitialItems] = useState<{ name: string; category: string; color: string }[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addItem, setAddItem] = useState({ name: '', category: '上装', color: '' });
+
+  const handleAddItem = () => {
+    if (!addItem.name || !addItem.color) return;
+    setInitialItems(prev => [...prev, addItem]);
+    setAddItem({ name: '', category: '上装', color: '' });
+    setShowAddForm(false);
+  };
+
+  const handleRemoveItem = (idx: number) => {
+    setInitialItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const categories = ['上装', '下装', '外套', '鞋', '包', '配饰'];
+
   const styles = [
-    { key: 'commute', name: '通勤简约', icon: '💼', bg: 'linear-gradient(135deg,#D4C4B0,#B8A99A)' },
-    { key: 'street', name: '街头潮流', icon: '🎧', bg: 'linear-gradient(135deg,#2D3748,#1A202C)' },
-    { key: 'minimal', name: '极简冷淡', icon: '◻️', bg: 'linear-gradient(135deg,#E2E8F0,#CBD5E0)' },
-    { key: 'vintage', name: '文艺复古', icon: '🎨', bg: 'linear-gradient(135deg,#9F7AEA,#805AD5)' },
-    { key: 'sport', name: '运动休闲', icon: '🏃', bg: 'linear-gradient(135deg,#48BB78,#38A169)' },
-    { key: 'sweet', name: '甜美少女', icon: '✨', bg: 'linear-gradient(135deg,#ED8936,#DD6B20)' },
+    { key: '通勤简约', name: '通勤简约', icon: '💼', bg: 'linear-gradient(135deg,#D4C4B0,#B8A99A)' },
+    { key: '街头潮流', name: '街头潮流', icon: '🎧', bg: 'linear-gradient(135deg,#2D3748,#1A202C)' },
+    { key: '极简冷淡', name: '极简冷淡', icon: '◻️', bg: 'linear-gradient(135deg,#E2E8F0,#CBD5E0)' },
+    { key: '文艺复古', name: '文艺复古', icon: '🎨', bg: 'linear-gradient(135deg,#9F7AEA,#805AD5)' },
+    { key: '运动休闲', name: '运动休闲', icon: '🏃', bg: 'linear-gradient(135deg,#48BB78,#38A169)' },
+    { key: '甜美少女', name: '甜美少女', icon: '✨', bg: 'linear-gradient(135deg,#ED8936,#DD6B20)' },
+    { key: '法式慵懒', name: '法式慵懒', icon: '🥐', bg: 'linear-gradient(135deg,#F6E6CB,#D4A574)' },
+    { key: '暗黑先锋', name: '暗黑先锋', icon: '🖤', bg: 'linear-gradient(135deg,#1A1A2E,#16213E)' },
+    { key: '盐系日系', name: '盐系日系', icon: '🌊', bg: 'linear-gradient(135deg,#B8D4E3,#7FB3D3)' },
+    { key: '老钱静奢', name: '老钱静奢', icon: '💎', bg: 'linear-gradient(135deg,#C9B99A,#A68B5B)' },
+    { key: '山系户外', name: '山系户外', icon: '🏔️', bg: 'linear-gradient(135deg,#6B8E6B,#4A7C59)' },
+    { key: '新中式', name: '新中式', icon: '🪭', bg: 'linear-gradient(135deg,#C0392B,#8E2218)' },
+    { key: 'Y2K千禧', name: 'Y2K千禧', icon: '🦋', bg: 'linear-gradient(135deg,#FF6FD8,#CD9FF7)' },
+    { key: '废土机能', name: '废土机能', icon: '⚡', bg: 'linear-gradient(135deg,#4A4A4A,#2C3E50)' },
+    { key: '芭蕾核心', name: '芭蕾核心', icon: '🩰', bg: 'linear-gradient(135deg,#FFB6C1,#FF69B4)' },
+    { key: '哥特浪漫', name: '哥特浪漫', icon: '🦇', bg: 'linear-gradient(135deg,#4A0E3C,#2C003E)' },
+    { key: '知识分子', name: '知识分子', icon: '📖', bg: 'linear-gradient(135deg,#8B7355,#6B5744)' },
+    { key: '辣妹热浪', name: '辣妹热浪', icon: '🔥', bg: 'linear-gradient(135deg,#FF4500,#FF6347)' },
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '0 24px', overflow: 'auto' }}>
@@ -190,22 +226,32 @@ function OnboardingPage({ onComplete, onSkip }: { onComplete: (data: any) => voi
         <div className="form-group"><label className="form-label">性别</label><div style={{ display: 'flex', gap: 12 }}><div className={`gender-btn ${form.gender === 'female' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, gender: 'female' }))}>👩 女士</div><div className={`gender-btn ${form.gender === 'male' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, gender: 'male' }))}>👨 男士</div><div className={`gender-btn ${form.gender === 'other' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, gender: 'other' }))}>其他</div></div></div>
         <div className="form-group"><label className="form-label">年龄</label><input className="form-input" type="number" placeholder="例如：25" value={form.age} onChange={e => setForm(f => ({ ...f, age: e.target.value }))} /></div>
         <div className="form-group"><label className="form-label">职业</label><input className="form-input" placeholder="例如：互联网产品经理" value={form.profession} onChange={e => setForm(f => ({ ...f, profession: e.target.value }))} /></div>
+        <div className="form-group"><label className="form-label">常驻城市</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{['北京', '上海', '广州', '深圳', '成都', '杭州', '武汉', '哈尔滨', '三亚', '西安'].map(c => <div key={c} className={`gender-btn ${form.permanentCity === c ? 'active' : ''}`} style={{ flex: 'unset', padding: '6px 14px', fontSize: 13 }} onClick={() => setForm(f => ({ ...f, permanentCity: c }))}>{c}</div>)}</div></div>
       </>}
-      {step === 2 && <><h1 style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 10, letterSpacing: -0.5 }}>构建你的衣橱</h1><p style={{ fontSize: 15, color: '#8A8A8A', lineHeight: 1.5, marginBottom: 32 }}>添加你的衣物单品</p>
-        <div style={{ marginBottom: 28 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><span style={{ fontSize: 17, fontWeight: 600 }}>上装</span><span style={{ fontSize: 13, color: '#8A8A8A', background: '#F0EEEB', padding: '4px 10px', borderRadius: 12 }}>0/3</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>{[1,2,3].map(i => <div key={i} className="upload-slot"><div style={{ width: 28, height: 28, borderRadius: '50%', background: '#F0EEEB', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>+</div><span style={{ fontSize: 12, color: '#8A8A8A' }}>添加</span></div>)}</div></div>
-        <div><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><span style={{ fontSize: 17, fontWeight: 600 }}>下装</span><span style={{ fontSize: 13, color: '#8A8A8A', background: '#F0EEEB', padding: '4px 10px', borderRadius: 12 }}>0/3</span></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>{[1,2,3].map(i => <div key={i} className="upload-slot"><div style={{ width: 28, height: 28, borderRadius: '50%', background: '#F0EEEB', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>+</div><span style={{ fontSize: 12, color: '#8A8A8A' }}>添加</span></div>)}</div></div>
+      {step === 2 && <><h1 style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 10, letterSpacing: -0.5 }}>构建你的衣橱</h1><p style={{ fontSize: 15, color: '#8A8A8A', lineHeight: 1.5, marginBottom: 24 }}>添加你的衣物单品</p>
+        {initialItems.length > 0 && <div style={{ marginBottom: 20 }}><div style={{ fontSize: 13, color: '#8A8A8A', marginBottom: 8 }}>已添加 {initialItems.length} 件</div><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{initialItems.map((item, idx) => <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#F0EDFF', borderRadius: 20, fontSize: 13, color: '#6C5CE7' }}><span>{CATEGORY_EMOJI[item.category] || '👕'} {item.name}</span><span style={{ cursor: 'pointer', opacity: 0.6 }} onClick={() => handleRemoveItem(idx)}>✕</span></div>)}</div></div>}
+        <div className="upload-slot" style={{ height: 80, flexDirection: 'row', gap: 10 }} onClick={() => setShowAddForm(true)}><div style={{ width: 36, height: 36, borderRadius: '50%', background: '#F0EEEB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>+</div><span style={{ fontSize: 14, color: '#8A8A8A' }}>添加一件衣物</span></div>
+        {showAddForm && <div style={{ marginTop: 16, padding: 16, background: '#fff', borderRadius: 14, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+          <div className="form-group"><label className="form-label">名称</label><input className="form-input" placeholder="如：白色T恤" value={addItem.name} onChange={e => setAddItem(a => ({ ...a, name: e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">分类</label><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{categories.map(c => <div key={c} className={`gender-btn ${addItem.category === c ? 'active' : ''}`} style={{ flex: 'unset', padding: '6px 14px', fontSize: 13 }} onClick={() => setAddItem(a => ({ ...a, category: c }))}>{c}</div>)}</div></div>
+          <div className="form-group"><label className="form-label">颜色</label><input className="form-input" placeholder="如：白色、黑色" value={addItem.color} onChange={e => setAddItem(a => ({ ...a, color: e.target.value }))} /></div>
+          <div style={{ display: 'flex', gap: 10 }}><button className="btn-primary" style={{ flex: 1 }} onClick={handleAddItem}>添加</button><button style={{ flex: 1, height: 56, background: '#fff', border: '1.5px solid #E8E6E3', borderRadius: 16, fontSize: 17, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }} onClick={() => setShowAddForm(false)}>取消</button></div>
+        </div>}
       </>}
-      {step === 3 && <><h1 style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 10, letterSpacing: -0.5 }}>你的风格偏好</h1><p style={{ fontSize: 15, color: '#8A8A8A', lineHeight: 1.5, marginBottom: 32 }}>标记最喜欢和最不喜欢的风格</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, paddingBottom: 20 }}>{styles.map(s => (
-          <div key={s.key} style={{ background: '#fff', borderRadius: 16, overflow: 'hidden', border: `2px solid ${likes.includes(s.key) ? '#34C759' : dislikes.includes(s.key) ? '#FF3B30' : 'transparent'}`, opacity: dislikes.includes(s.key) ? 0.75 : 1, transition: 'all 0.2s' }}>
-            <div style={{ height: 110, background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, opacity: 0.8 }}>{s.icon}</div>
-            <div style={{ padding: '10px 12px 12px' }}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{s.name}</div><div style={{ display: 'flex', gap: 6 }}>
-              <button style={{ flex: 1, height: 30, borderRadius: 8, border: likes.includes(s.key) ? 'none' : '1px solid #E8E6E3', background: likes.includes(s.key) ? '#34C759' : '#fff', color: likes.includes(s.key) ? '#fff' : '#4A4A4A', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: 0, fontFamily: 'inherit' }} onClick={() => setLikes(l => l.includes(s.key) ? l.filter(x => x !== s.key) : [...l, s.key])}>👍</button>
-              <button style={{ flex: 1, height: 30, borderRadius: 8, border: dislikes.includes(s.key) ? 'none' : '1px solid #E8E6E3', background: dislikes.includes(s.key) ? '#FF3B30' : '#fff', color: dislikes.includes(s.key) ? '#fff' : '#4A4A4A', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: 0, fontFamily: 'inherit' }} onClick={() => setDislikes(d => d.includes(s.key) ? d.filter(x => x !== s.key) : [...d, s.key])}>👎</button>
+      {step === 3 && <><h1 style={{ fontSize: 28, fontWeight: 700, color: '#1a1a1a', marginBottom: 10, letterSpacing: -0.5 }}>你的风格偏好</h1><p style={{ fontSize: 15, color: '#8A8A8A', lineHeight: 1.5, marginBottom: 24 }}>标记最喜欢和最不喜欢的风格</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, paddingBottom: 20 }}>{styles.map(s => {
+          const liked = likes.includes(s.key);
+          const disliked = dislikes.includes(s.key);
+          return (
+          <div key={s.key} style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', border: `2px solid ${liked ? '#34C759' : disliked ? '#FF3B30' : 'transparent'}`, opacity: disliked ? 0.7 : 1, transition: 'all 0.2s' }}>
+            <div style={{ height: 72, background: s.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, opacity: 0.85 }}>{s.icon}</div>
+            <div style={{ padding: '8px 10px 10px' }}><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{s.name}</div><div style={{ display: 'flex', gap: 6 }}>
+              <button style={{ flex: 1, height: 28, borderRadius: 7, border: liked ? 'none' : '1px solid #E8E6E3', background: liked ? '#34C759' : '#fff', color: liked ? '#fff' : '#4A4A4A', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, padding: 0, fontFamily: 'inherit' }} onClick={() => { setLikes(l => l.includes(s.key) ? l.filter(x => x !== s.key) : [...l, s.key]); if (disliked) setDislikes(d => d.filter(x => x !== s.key)); }}>👍</button>
+              <button style={{ flex: 1, height: 28, borderRadius: 7, border: disliked ? 'none' : '1px solid #E8E6E3', background: disliked ? '#FF3B30' : '#fff', color: disliked ? '#fff' : '#4A4A4A', fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, padding: 0, fontFamily: 'inherit' }} onClick={() => { setDislikes(d => d.includes(s.key) ? d.filter(x => x !== s.key) : [...d, s.key]); if (liked) setLikes(l => l.filter(x => x !== s.key)); }}>👎</button>
             </div></div></div>
-        ))}</div></>}
+        ); })}</div></>}
       <div style={{ padding: '16px 0 40px', flexShrink: 0, marginTop: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{step > 1 && <button style={{ width: 52, height: 52, borderRadius: '50%', background: '#fff', border: '1.5px solid #E8E6E3', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, cursor: 'pointer', flexShrink: 0, color: '#2C2C2C', fontFamily: 'inherit' }} onClick={() => setStep(s => s - 1)}>←</button>}<button className="btn-primary" onClick={() => { if (step < 3) setStep(s => s + 1); else onComplete({ ...form, styleLikes: likes, styleDislikes: dislikes }); }}>{step < 3 ? '下一步' : '完成设置'}</button></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{step > 1 && <button style={{ width: 52, height: 52, borderRadius: '50%', background: '#fff', border: '1.5px solid #E8E6E3', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, cursor: 'pointer', flexShrink: 0, color: '#2C2C2C', fontFamily: 'inherit' }} onClick={() => setStep(s => s - 1)}>←</button>}<button className="btn-primary" onClick={() => { if (step < 3) setStep(s => s + 1); else onComplete({ ...form, styleLikes: likes, styleDislikes: dislikes, initialItems }); }}>{step < 3 ? '下一步' : '完成设置'}</button></div>
         <div style={{ textAlign: 'center', marginTop: 12, fontSize: 14, color: '#8A8A8A', cursor: 'pointer' }} onClick={onSkip}>跳过</div>
       </div>
     </div>
@@ -214,7 +260,7 @@ function OnboardingPage({ onComplete, onSkip }: { onComplete: (data: any) => voi
 
 const CATEGORY_EMOJI: Record<string, string> = { '上装': '👔', '下装': '👖', '外套': '🧥', '鞋': '👟', '包': '🎒', '配饰': '⌚' };
 
-function OutfitPage({ weather, wardrobeItems, outfits, openSubpage }: { weather: any; wardrobeItems: any[]; outfits: any[]; openSubpage: (id: string, data?: any) => void }) {
+function OutfitPage({ weather, wardrobeItems, outfits, openSubpage, updateWeather }: { weather: any; wardrobeItems: any[]; outfits: any[]; openSubpage: (id: string, data?: any) => void; updateWeather: (city: string) => void }) {
   const [search, setSearch] = useState('');
   const [selectedTags, setSelectedTags] = useState<Record<string, string[]>>({ occasion: [], style: [], color: [], temp: ['薄款'] });
   const [nlpKeywords, setNlpKeywords] = useState<string[]>([]);
@@ -236,7 +282,7 @@ function OutfitPage({ weather, wardrobeItems, outfits, openSubpage }: { weather:
       </div>
       <div style={{ padding: '16px 20px' }}><button className="btn-accent" onClick={generate}>✨ 生成穿搭推荐</button></div>
       <div style={{ padding: '0 20px 20px' }}><div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '14px 18px' }} onClick={() => openSubpage('outfitLibrary')}><div><div style={{ fontWeight: 700, marginBottom: 3, fontSize: 15 }}>📂 穿搭记录</div><div style={{ fontSize: 12, color: '#8A8A8A' }}>{outfits.length}套搭配</div></div><div style={{ display: 'flex' }}>{['👔','👗','👕'].map((e, i) => <div key={i} style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#E8D5C4,#C49A6C)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, marginLeft: -6, border: '2px solid #fff' }}>{e}</div>)}</div></div></div>
-      {showCityModal && <div className="modal-overlay active" onClick={() => setShowCityModal(false)}><div className="modal-sheet" onClick={e => e.stopPropagation()}><div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, textAlign: 'center' }}>📍 选择城市</div>{cities.map(c => <div key={c} style={{ padding: '10px 12px', fontSize: 14, color: '#636E72', borderRadius: 8, cursor: 'pointer' }} onClick={async () => { setShowCityModal(false); const r = await fetch(`/api/weather?city=${encodeURIComponent(c)}`); const d = await r.json(); if (d.city) window.dispatchEvent(new CustomEvent('weather-update', { detail: d })); }}>{c}</div>)}</div></div>}
+      {showCityModal && <div className="modal-overlay active" onClick={() => setShowCityModal(false)}><div className="modal-sheet" onClick={e => e.stopPropagation()}><div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16, textAlign: 'center' }}>📍 选择城市</div>{cities.map(c => <div key={c} style={{ padding: '10px 12px', fontSize: 14, color: '#636E72', borderRadius: 8, cursor: 'pointer' }} onClick={() => { setShowCityModal(false); updateWeather(c); }}>{c}</div>)}</div></div>}
       <div style={{ height: 20 }}></div>
     </div>
   );
